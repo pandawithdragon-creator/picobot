@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"net/http" // Add if missing
+	
 
 	"github.com/spf13/cobra"
 
@@ -377,9 +379,19 @@ func NewRootCmd() *cobra.Command {
 }
 
 func main() {
-	rootCmd := NewRootCmd()
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+    // YOUR NEW CODE STARTS HERE
+	go func() {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "Bot is running!")
+		})
+		http.ListenAndServe(":"+port, nil)
+	}()
+    // YOUR NEW CODE ENDS HERE
+
+    // Keep all the 385 lines of original code below this!
+    cmd.Execute() 
 }
