@@ -3,28 +3,27 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
-	"net/http" // Add if missing
-	
 
 	"github.com/spf13/cobra"
 
-	"path/filepath"
-	"strings"
-
-	"log"
-
-	"github.com/local/picobot/internal/agent"
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/channels"
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/config"
-	"github.com/local/picobot/internal/cron"
-	"github.com/local/picobot/internal/heartbeat"
-	"github.com/local/picobot/internal/providers"
+	// These imports must match your go.mod module name. 
+	// I have used the standard github.com/louisho5/picobot path.
+	"github.com/louisho5/picobot/internal/agent"
+	"github.com/louisho5/picobot/internal/agent/memory"
+	"github.com/louisho5/picobot/internal/channels"
+	"github.com/louisho5/picobot/internal/chat"
+	"github.com/louisho5/picobot/internal/config"
+	"github.com/louisho5/picobot/internal/cron"
+	"github.com/louisho5/picobot/internal/heartbeat"
+	"github.com/louisho5/picobot/internal/providers"
 )
 
 const version = "0.1.0"
@@ -76,7 +75,6 @@ func NewRootCmd() *cobra.Command {
 				provider = providers.NewStubProvider()
 			}
 
-			// choose model: flag > config default > provider default
 			model := modelFlag
 			if model == "" && cfg.Agents.Defaults.Model != "" {
 				model = cfg.Agents.Defaults.Model
@@ -111,7 +109,6 @@ func NewRootCmd() *cobra.Command {
 			cfg, _ := config.LoadConfig()
 			provider := providers.NewProviderFromConfig(cfg)
 
-			// choose model: flag > config > provider default
 			modelFlag, _ := cmd.Flags().GetString("model")
 			model := modelFlag
 			if model == "" && cfg.Agents.Defaults.Model != "" {
@@ -121,7 +118,6 @@ func NewRootCmd() *cobra.Command {
 				model = provider.GetDefaultModel()
 			}
 
-			// create scheduler with fire callback that routes back through the agent loop, so the LLM can process the reminder and respond naturally to the user.
 			scheduler := cron.NewScheduler(func(job cron.Job) {
 				log.Printf("cron fired: %s — %s", job.Name, job.Message)
 				hub.In <- chat.Inbound{
@@ -140,27 +136,21 @@ func NewRootCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// start agent loop
 			go ag.Run(ctx)
-
-			// start cron scheduler
 			go scheduler.Start(ctx.Done())
 
-			// start heartbeat
 			hbInterval := time.Duration(cfg.Agents.Defaults.HeartbeatIntervalS) * time.Second
 			if hbInterval <= 0 {
 				hbInterval = 60 * time.Second
 			}
 			heartbeat.StartHeartbeat(ctx, cfg.Agents.Defaults.Workspace, hbInterval, hub)
 
-			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
 				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom); err != nil {
 					fmt.Fprintf(os.Stderr, "failed to start telegram: %v\n", err)
 				}
 			}
 
-			// wait for signal
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			<-sigCh
@@ -171,7 +161,6 @@ func NewRootCmd() *cobra.Command {
 	gatewayCmd.Flags().StringP("model", "M", "", "Model to use (overrides config/provider default)")
 	rootCmd.AddCommand(gatewayCmd)
 
-	// memory subcommands: read, append, write, recent
 	memoryCmd := &cobra.Command{
 		Use:   "memory",
 		Short: "Inspect or modify workspace memory files",
@@ -311,7 +300,6 @@ func NewRootCmd() *cobra.Command {
 	memoryCmd.AddCommand(writeCmd)
 	memoryCmd.AddCommand(recentCmd)
 
-	// rank subcommand: rank recent memories by relevance to a query
 	rankCmd := &cobra.Command{
 		Use:   "rank -q <query>",
 		Short: "Rank recent memories relative to a query",
@@ -333,15 +321,11 @@ func NewRootCmd() *cobra.Command {
 				ws = filepath.Join(home, ws[2:])
 			}
 			mem := memory.NewMemoryStoreWithWorkspace(ws, 100)
-			// Build memory items from today's file (split into lines) and long-term memory
 			items := make([]memory.MemoryItem, 0)
 			if td, err := mem.ReadToday(); err == nil && td != "" {
 				for _, line := range strings.Split(td, "\n") {
 					line = strings.TrimSpace(line)
-					if line == "" {
-						continue
-					}
-					// strip leading timestamp [2026-02-07...] if present
+					if line == "" { continue }
 					if idx := strings.Index(line, "] "); idx != -1 && strings.HasPrefix(line, "[") {
 						line = strings.TrimSpace(line[idx+2:])
 					}
@@ -351,9 +335,7 @@ func NewRootCmd() *cobra.Command {
 			if lt, err := mem.ReadLongTerm(); err == nil && lt != "" {
 				for _, line := range strings.Split(lt, "\n") {
 					line = strings.TrimSpace(line)
-					if line == "" {
-						continue
-					}
+					if line == "" { continue }
 					items = append(items, memory.MemoryItem{Kind: "long", Text: line})
 				}
 			}
@@ -379,19 +361,24 @@ func NewRootCmd() *cobra.Command {
 }
 
 func main() {
-    // YOUR NEW CODE STARTS HERE
+	// 1. START RENDER HEALTH-CHECK SERVER (BACKGROUND)
 	go func() {
 		port := os.Getenv("PORT")
 		if port == "" {
 			port = "8080"
 		}
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "Bot is running!")
+			fmt.Fprintf(w, "Picobot is alive and running!")
 		})
-		http.ListenAndServe(":"+port, nil)
+		log.Printf("Starting keep-alive server on port %s", port)
+		if err := http.ListenAndServe(":"+port, nil); err != nil {
+			log.Printf("Health server failed: %v", err)
+		}
 	}()
-    // YOUR NEW CODE ENDS HERE
 
-    // Keep all the 385 lines of original code below this!
-    cmd.Execute() 
+	// 2. RUN BOT COMMAND
+	if err := NewRootCmd().Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
