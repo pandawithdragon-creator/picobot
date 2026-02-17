@@ -14,8 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	// These imports must match your go.mod module name. 
-	// I have used the standard github.com/louisho5/picobot path.
+	// These must start with the name defined in go.mod
 	"github.com/louisho5/picobot/internal/agent"
 	"github.com/louisho5/picobot/internal/agent/memory"
 	"github.com/louisho5/picobot/internal/channels"
